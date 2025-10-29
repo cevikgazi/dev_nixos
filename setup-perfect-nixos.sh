@@ -191,11 +191,21 @@ EOF
 
 # nvidia.nix
 cat > "$FLAKE_DIR/modules/nvidia.nix" << 'EOF'
-{ config, pkgs, ... }: # DÜZELTME: 'config' eklendi
+{ config, pkgs, ... }:
 
 {
   hardware.nvidia.package = config.boot.kernelPackages.nvidiaPackages.stable;
   services.xserver.videoDrivers = [ "nvidia" ];
+
+  # DÜZELTME: Bu ayar 25.05 sürümüyle zorunlu hale geldi.
+  #
+  # Eğer Turing (RTX serisi, GTX 16xx) veya DAHA YENİ bir kartınız varsa 'true' yapın.
+  # Daha ESKİ bir kartsa veya emin değilseniz 'false' (kapalı kaynak) olarak bırakın.
+  #
+  hardware.nvidia.open = false;
+
+  # Örnek: (Eğer yeni bir kartınız varsa 'false' satırını silip bu satırın başındaki # işaretini kaldırın)
+  # hardware.nvidia.open = true;
 }
 EOF
 
