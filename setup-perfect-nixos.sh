@@ -242,16 +242,7 @@ if [ ! -f "$FLAKE_DIR/hardware-configuration.nix" ]; then
     exit 1
 fi
 
-nixos-rebuild switch --flake "$FLAKE_DIR#nixos-acb" --show-trace || {
-  echo -e "${RED}HATA! Yapılandırma başarısız oldu.${NC}"
-  echo -e "${YELLOW}Yedek ($BACKUP_DIR) geri yükleniyor...${NC}"
-  # Hatalı yeni dosyaları temizle ve yedeği geri yükle
-  rm -rf "$FLAKE_DIR"/*
-  cp -r "$BACKUP_DIR"/* "$FLAKE_DIR"/
-  echo -e "${YELLOW}Eski yapılandırmaya geri dönülüyor (rollback)...${NC}"
-  nixos-rebuild switch --rollback
-  exit 1
-}
+nixos-rebuild switch --flake "$FLAKE_DIR#nixos-acb" --show-trace
 
 # 6. dev-env setup.sh düzelt
 # DÜZELTME: Step 6 (docker plugin) gereksiz olduğu için kaldırıldı. Bu artık Step 6.
