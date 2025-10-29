@@ -27,21 +27,45 @@ echo -e "\n${YELLOW}DİSK KULLANIMI (df -h):${NC}"; df -h
 echo -e "\n${YELLOW}AĞ BAĞLANTILARI:${NC}"; ip -br a
 echo -e "\n${YELLOW}ÇALIŞAN SERVİSLER (docker, sshd, gnome):${NC}"; systemctl is-active docker sshd gdm || true
 
-# 2. Flake dizini ve Yedekleme
+# 2. SİSTEM TEMİZLEME (hardware-configuration.nix korunur)
+echo -e "\n${GREEN}SİSTEM TEMİZLENİYOR (hardware-configuration.nix korunacak)...${NC}"
 FLAKE_DIR="/etc/nixos"
-BACKUP_DIR="$FLAKE_DIR.backup.$(date +%s)"
-mkdir -p "$BACKUP_DIR"
-# Mevcut çalışan (belki bozuk) yapılandırmayı yedekle
-if [ -d "$FLAKE_DIR" ] && [ "$(ls -A $FLAKE_DIR)" ]; then
-    cp -r "$FLAKE_DIR"/* "$BACKUP_DIR"/ 2>/dev/null || true
-    echo -e "${GREEN}Yedek alındı → $BACKUP_DIR${NC}"
-else
-    echo -e "${YELLOW}Uyarı: $FLAKE_DIR boş veya yok. Yedek alınmadı.${NC}"
+
+# En önemli dosyanın (hardware-configuration.nix) var olduğundan emin olalım.
+if [ ! -f "$FLAKE_DIR/hardware-configuration.nix" ]; then
+    echo -e "${RED}HATA: $FLAKE_DIR/hardware-configuration.nix bulunamadı!${NC}"
+    echo -e "${YELLOW}Lütfen önce 'sudo nixos-generate-config --root /' ile bu dosyayı oluşturun.${NC}"
+    echo -e "${YELLOW}Dosya yoksa, bu script /etc/nixos dizinini temizleyemez veya kuramaz.${NC}"
+    
+    # Eğer dizin hiç yoksa, oluşturalım
     mkdir -p "$FLAKE_DIR"
+    exit 1
+else
+    echo "Temizleme işlemi başlıyor..."
+    
+    # 1. Tüm eski yapılandırmayı .ESKI dizinine taşı
+    # (Script zaten root, 'sudo' gereksiz)
+    mv "$FLAKE_DIR" /etc/nixos.ESKI
+    
+    # 2. Temiz bir /etc/nixos dizini oluştur
+    mkdir "$FLAKE_DIR"
+    
+    # 3. Sadece hayati önem taşıyan donanım dosyasını geri taşı
+    mv /etc/nixos.ESKI/hardware-configuration.nix "$FLAKE_DIR/"
+    
+    # 4. Artık ihtiyaç duyulmayan .ESKI dizinini sil
+    rm -rf /etc/nixos.ESKI
+    
+    # 5. Soruna neden olan tüm eski .backup dizinlerini sil
+    rm -rf /etc/nixos.backup.*
+    
+    echo -e "\n${GREEN}TEMİZLİK BAŞARILI!${NC}"
+    echo "$FLAKE_DIR dizini temizlendi ve sadece 'hardware-configuration.nix' korundu."
 fi
 
+
 # 3. MÜKEMMEL FLAKE YAPISI OLUŞTUR
-echo -e "${GREEN}MÜKEMMEL FLAKE YAPISI KURULUYOR...${NC}"
+echo -e "\n${GREEN}MÜKEMMEL FLAKE YAPISI KURULUYOR...${NC}"
 
 cat > "$FLAKE_DIR/flake.nix" << 'EOF'
 {
@@ -68,8 +92,7 @@ cat > "$FLAKE_DIR/configuration.nix" << 'EOF'
 {
   imports = [
     # hardware-configuration.nix'in var olduğundan emin olun!
-    # Eğer yoksa, 'sudo nixos-generate-config --root /' çalıştırın
-    # ve oluşan hardware-configuration.nix'i /etc/nixos/ içine kopyalayın.
+    # (Yukarıdaki Adım 2'de bu dosya korundu)
     ./hardware-configuration.nix
 
     ./modules/base.nix
@@ -187,9 +210,6 @@ cat > "$FLAKE_DIR/modules/user.nix" << 'EOF'
 }
 EOF
 
-# DÜZELTME: docker.nix modülü gereksiz olduğu için kaldırıldı.
-# 'docker-compose' paketini systemPackages'e eklemek yeterlidir.
-
 # nvidia.nix
 cat > "$FLAKE_DIR/modules/nvidia.nix" << 'EOF'
 { config, pkgs, ... }:
@@ -199,14 +219,7 @@ cat > "$FLAKE_DIR/modules/nvidia.nix" << 'EOF'
   services.xserver.videoDrivers = [ "nvidia" ];
 
   # DÜZELTME: Bu ayar 25.05 sürümüyle zorunlu hale geldi.
-  #
-  # Eğer Turing (RTX serisi, GTX 16xx) veya DAHA YENİ bir kartınız varsa 'true' yapın.
-  # Daha ESKİ bir kartsa veya emin değilseniz 'false' (kapalı kaynak) olarak bırakın.
-  #
   hardware.nvidia.open = false;
-
-  # Örnek: (Eğer yeni bir kartınız varsa 'false' satırını silip bu satırın başındaki # işaretini kaldırın)
-  # hardware.nvidia.open = true;
 }
 EOF
 
@@ -233,21 +246,18 @@ chown -R root:root "$FLAKE_DIR"
 find "$FLAKE_DIR" -type f -name "*.nix" -exec chmod 644 {} \;
 
 # 5. Yeniden derle
-echo -e "${GREEN}NixOS yeniden derleniyor...${NC}"
+echo -e "\n${GREEN}NixOS yeniden derleniyor...${NC}"
 
-# ÖNEMLİ: Eğer hardware-configuration.nix yoksa bu adım başarısız olur.
+# (Bu kontrol artık gereksiz çünkü Adım 2'de yapıldı, ama zararı yok)
 if [ ! -f "$FLAKE_DIR/hardware-configuration.nix" ]; then
-    echo -e "${RED}HATA: /etc/nixos/hardware-configuration.nix bulunamadı!${NC}"
-    echo -e "${YELLOW}Lütfen önce 'sudo nixos-generate-config --root /' çalıştırın,"
-    echo -e "ve oluşan hardware-configuration.nix'i /etc/nixos/ dizinine taşıyın.${NC}"
+    echo -e "${RED}HATA: $FLAKE_DIR/hardware-configuration.nix bulunamadı!${NC}"
     exit 1
 fi
 
 nixos-rebuild switch --flake "$FLAKE_DIR#nixos-acb" --show-trace
 
 # 6. dev-env setup.sh düzelt
-# DÜZELTME: Step 6 (docker plugin) gereksiz olduğu için kaldırıldı. Bu artık Step 6.
-# DÜZELTME: $HOME yerine /home/acb kullanıldı.
+echo -e "\n${GREEN}Geliştirici ortamı ayarlanıyor...${NC}"
 DEV_ENV="/home/acb/Masaüstü/Docker-havuz/dev-env"
 if [ -f "$DEV_ENV/setup.sh" ]; then
   sed -i 's/docker-compose up/docker compose up/g' "$DEV_ENV/setup.sh"
@@ -259,13 +269,12 @@ else
 fi
 
 # 7. TAMAM!
-echo -e "${GREEN}
+echo -e "\n${GREEN}
 MÜKEMMEL NIXOS HAZIR!
 ====================
 Sistem: $(nixos-version)
 Docker: $(docker --version)
 Compose: $(docker compose version 2>/dev/null || echo "docker compose plugin aktif")
-Disk: lsblk ile gösterildi
 
 ŞİMDİ:
   1. sudo reboot
