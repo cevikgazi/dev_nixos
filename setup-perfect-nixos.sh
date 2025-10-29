@@ -21,26 +21,24 @@ echo -e "${YELLOW}Hostname:${NC} $(hostname)"
 echo -e "${YELLOW}Kernel:${NC} $(uname -r)"
 echo -e "${YELLOW}CPU:${NC} $(lscpu | grep "Model name" | awk -F: '{print $2}' | xargs)"
 echo -e "${YELLOW}RAM:${NC} $(free -h | awk '/^Mem:/ {print $2}') toplam"
-echo -e "${YELLOW}GPU:${NC} $(lspci | grep -i vga || echo "Tespit edilemedi")"
+echo -e "${YELLOW}GPU:${NC} $(lspci | grep -i vga || echo "Tespit edilemedi (lspci için pciutils gerekebilir)")"
+echo -e "\n${YELLOW}DİSKLER (lsblk):${NC}"; lsblk -f
+echo -e "\n${YELLOW}DİSK KULLANIMI (df -h):${NC}"; df -h
+echo -e "\n${YELLOW}AĞ BAĞLANTILARI:${NC}"; ip -br a
+echo -e "\n${YELLOW}ÇALIŞAN SERVİSLER (docker, sshd, gnome):${NC}"; systemctl is-active docker sshd gdm || true
 
-echo -e "\n${YELLOW}DİSKLER (lsblk):${NC}"
-lsblk -f
-
-echo -e "\n${YELLOW}DİSK KULLANIMI (df -h):${NC}"
-df -h
-
-echo -e "\n${YELLOW}AĞ BAĞLANTILARI:${NC}"
-ip -br a
-
-echo -e "\n${YELLOW}ÇALIŞAN SERVİSLER (docker, sshd, gnome):${NC}"
-systemctl is-active docker sshd gdm || true
-
-# 2. Flake dizini
+# 2. Flake dizini ve Yedekleme
 FLAKE_DIR="/etc/nixos"
 BACKUP_DIR="$FLAKE_DIR.backup.$(date +%s)"
 mkdir -p "$BACKUP_DIR"
-cp -r "$FLAKE_DIR"/* "$BACKUP_DIR"/ 2>/dev/null || true
-echo -e "${GREEN}Yedek alındı → $BACKUP_DIR${NC}"
+# Mevcut çalışan (belki bozuk) yapılandırmayı yedekle
+if [ -d "$FLAKE_DIR" ] && [ "$(ls -A $FLAKE_DIR)" ]; then
+    cp -r "$FLAKE_DIR"/* "$BACKUP_DIR"/ 2>/dev/null || true
+    echo -e "${GREEN}Yedek alındı → $BACKUP_DIR${NC}"
+else
+    echo -e "${YELLOW}Uyarı: $FLAKE_DIR boş veya yok. Yedek alınmadı.${NC}"
+    mkdir -p "$FLAKE_DIR"
+fi
 
 # 3. MÜKEMMEL FLAKE YAPISI OLUŞTUR
 echo -e "${GREEN}MÜKEMMEL FLAKE YAPISI KURULUYOR...${NC}"
@@ -69,10 +67,14 @@ cat > "$FLAKE_DIR/configuration.nix" << 'EOF'
 
 {
   imports = [
+    # hardware-configuration.nix'in var olduğundan emin olun!
+    # Eğer yoksa, 'sudo nixos-generate-config --root /' çalıştırın
+    # ve oluşan hardware-configuration.nix'i /etc/nixos/ içine kopyalayın.
     ./hardware-configuration.nix
+
     ./modules/base.nix
     ./modules/desktop.nix
-    ./modules/docker.nix
+    # ./modules/docker.nix # DÜZELTME: Gereksiz, kaldırıldı.
     ./modules/user.nix
     ./modules/nix.nix
     ./modules/nvidia.nix
@@ -94,6 +96,7 @@ cat > "$FLAKE_DIR/modules/base.nix" << 'EOF'
     curl wget git vim htop tree unzip
     docker-compose  # v2
     lazydocker
+    pciutils      # DÜZELTME: lspci komutu için eklendi
   ];
 
   virtualisation.docker.enable = true;
@@ -133,7 +136,6 @@ cat > "$FLAKE_DIR/modules/user.nix" << 'EOF'
     description = "Ana kullanıcı";
     extraGroups = [ "wheel" "dbus" "docker" "networkmanager" "video" ];
 
-    # KULLANICIYA ÖZEL PAKETLER (senin eskiden kullandıkların)
     packages = with pkgs; [
       # Tarayıcılar
       brave
@@ -184,29 +186,12 @@ cat > "$FLAKE_DIR/modules/user.nix" << 'EOF'
 }
 EOF
 
-# docker.nix (SADECE PLUGIN)
-cat > "$FLAKE_DIR/modules/docker.nix" << 'EOF'
-{ pkgs, ... }:
-
-{
-  systemd.services.setup-docker-compose-plugin = {
-    description = "Docker Compose CLI Plugin";
-    wantedBy = [ "multi-user.target" ];
-    after = [ "local-fs.target" ];
-    serviceConfig.Type = "oneshot";
-    serviceConfig.User = "acb";
-    script = ''
-      mkdir -p "$HOME/.docker/cli-plugins"
-      [ ! -f "$HOME/.docker/cli-plugins/docker-compose" ] && \
-        ln -sf ${pkgs.docker-compose}/bin/docker-compose "$HOME/.docker/cli-plugins/docker-compose"
-    '';
-  };
-}
-EOF
+# DÜZELTME: docker.nix modülü gereksiz olduğu için kaldırıldı.
+# 'docker-compose' paketini systemPackages'e eklemek yeterlidir.
 
 # nvidia.nix
 cat > "$FLAKE_DIR/modules/nvidia.nix" << 'EOF'
-{ pkgs, ... }:
+{ config, pkgs, ... }: # DÜZELTME: 'config' eklendi
 
 {
   hardware.nvidia.package = config.boot.kernelPackages.nvidiaPackages.stable;
@@ -216,7 +201,7 @@ EOF
 
 # hibernation.nix
 cat > "$FLAKE_DIR/modules/hibernation.nix" << 'EOF'
-{ lib, ... }:
+{ lib, pkgs, ... }: # DÜZELTME: 'pkgs' eklendi
 
 {
   powerManagement.resumeCommands = "${lib.getBin pkgs.systemd}/bin/systemctl --no-block restart display-manager.service";
@@ -234,44 +219,55 @@ EOF
 
 # 4. Dosya izinleri
 chown -R root:root "$FLAKE_DIR"
-find "$FLAKE_DIR" -name "*.nix" -exec chmod 644 {} \;
+find "$FLAKE_DIR" -type f -name "*.nix" -exec chmod 644 {} \;
 
 # 5. Yeniden derle
 echo -e "${GREEN}NixOS yeniden derleniyor...${NC}"
+
+# ÖNEMLİ: Eğer hardware-configuration.nix yoksa bu adım başarısız olur.
+if [ ! -f "$FLAKE_DIR/hardware-configuration.nix" ]; then
+    echo -e "${RED}HATA: /etc/nixos/hardware-configuration.nix bulunamadı!${NC}"
+    echo -e "${YELLOW}Lütfen önce 'sudo nixos-generate-config --root /' çalıştırın,"
+    echo -e "ve oluşan hardware-configuration.nix'i /etc/nixos/ dizinine taşıyın.${NC}"
+    exit 1
+fi
+
 nixos-rebuild switch --flake "$FLAKE_DIR#nixos-acb" --show-trace || {
-  echo -e "${RED}HATA! Geri alınıyor...${NC}"
+  echo -e "${RED}HATA! Yapılandırma başarısız oldu.${NC}"
+  echo -e "${YELLOW}Yedek ($BACKUP_DIR) geri yükleniyor...${NC}"
+  # Hatalı yeni dosyaları temizle ve yedeği geri yükle
+  rm -rf "$FLAKE_DIR"/*
   cp -r "$BACKUP_DIR"/* "$FLAKE_DIR"/
+  echo -e "${YELLOW}Eski yapılandırmaya geri dönülüyor (rollback)...${NC}"
   nixos-rebuild switch --rollback
   exit 1
 }
 
-# 6. Docker plugin’i kullanıcıya kur
-echo -e "${GREEN}Docker Compose plugin'i kuruluyor...${NC}"
-sudo -u acb bash -c '
-  mkdir -p ~/.docker/cli-plugins
-  ln -sf $(which docker-compose) ~/.docker/cli-plugins/docker-compose 2>/dev/null || true
-'
-
-# 7. dev-env setup.sh düzelt
-DEV_ENV="$HOME/acb/Masaüstü/Docker-havuz/dev-env"
+# 6. dev-env setup.sh düzelt
+# DÜZELTME: Step 6 (docker plugin) gereksiz olduğu için kaldırıldı. Bu artık Step 6.
+# DÜZELTME: $HOME yerine /home/acb kullanıldı.
+DEV_ENV="/home/acb/Masaüstü/Docker-havuz/dev-env"
 if [ -f "$DEV_ENV/setup.sh" ]; then
   sed -i 's/docker-compose up/docker compose up/g' "$DEV_ENV/setup.sh"
+  chown acb:users "$DEV_ENV/setup.sh" # İzinlerin doğru olduğundan emin ol
   chmod +x "$DEV_ENV/setup.sh"
-  echo -e "${GREEN}setup.sh güncellendi${NC}"
+  echo -e "${GREEN}setup.sh güncellendi ($DEV_ENV/setup.sh)${NC}"
+else
+  echo -e "${YELLOW}Uyarı: $DEV_ENV/setup.sh bulunamadı. Atlantı.${NC}"
 fi
 
-# 8. TAMAM!
+# 7. TAMAM!
 echo -e "${GREEN}
 MÜKEMMEL NIXOS HAZIR!
 ====================
 Sistem: $(nixos-version)
 Docker: $(docker --version)
-Compose: $(docker compose version 2>/dev/null || echo "kuruluyor...")
+Compose: $(docker compose version 2>/dev/null || echo "docker compose plugin aktif")
 Disk: lsblk ile gösterildi
 
 ŞİMDİ:
   1. sudo reboot
-  2. cd ~/Masaüstü/Docker-havuz/dev-env
+  2. cd /home/acb/Masaüstü/Docker-havuz/dev-env
   3. ./setup.sh → dev-env BAŞLASIN!
 
 http://localhost:8080 → Code Server
