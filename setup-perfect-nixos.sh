@@ -74,12 +74,13 @@ cat > "$FLAKE_DIR/configuration.nix" << 'EOF'
 
     ./modules/base.nix
     ./modules/desktop.nix
-    # ./modules/docker.nix # DÜZELTME: Gereksiz, kaldırıldı.
     ./modules/user.nix
     ./modules/nix.nix
     ./modules/nvidia.nix
     ./modules/hibernation.nix
   ];
+  # özgür olmayan paketlere izin ver
+  nixpkgs.config.allowUnfree = true;
 
   system.stateVersion = "25.05";
 }
