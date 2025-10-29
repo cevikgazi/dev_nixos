@@ -107,7 +107,7 @@ cat > "$FLAKE_DIR/configuration.nix" << 'EOF'
   boot.loader.grub.efiSupport = true;       # UEFI modunu etkinleştir
   boot.loader.grub.efiInstallAsRemovable = true; # Çıkarılabilir medya gibi kur (genellikle uyumluluğu artırır)
   boot.loader.grub.devices = [ "nodev" ];    # UEFI için diski belirtme ("nodev" kullan)
-  boot.loader.efi.canTouchEfiVariables = true; # EFI değişkenlerine dokunmasına izin ver
+  boot.loader.efi.canTouchEfiVariables = false; # EFI değişkenlerine dokunmasına izin verme
   boot.loader.systemd-boot.enable = false;    # GRUB kullanıyorsak systemd-boot'u kapat
   # ------------------------------------
 
