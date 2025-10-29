@@ -91,10 +91,7 @@ cat > "$FLAKE_DIR/configuration.nix" << 'EOF'
 
 {
   imports = [
-    # hardware-configuration.nix'in var olduğundan emin olun!
-    # (Yukarıdaki Adım 2'de bu dosya korundu)
     ./hardware-configuration.nix
-
     ./modules/base.nix
     ./modules/desktop.nix
     ./modules/user.nix
@@ -102,8 +99,17 @@ cat > "$FLAKE_DIR/configuration.nix" << 'EOF'
     ./modules/nvidia.nix
     ./modules/hibernation.nix
   ];
-  # özgür olmayan paketlere izin ver
+
   nixpkgs.config.allowUnfree = true;
+
+  # --- YENİ EKLENEN UEFI AYARLARI ---
+  boot.loader.grub.enable = true;
+  boot.loader.grub.efiSupport = true;       # UEFI modunu etkinleştir
+  boot.loader.grub.efiInstallAsRemovable = true; # Çıkarılabilir medya gibi kur (genellikle uyumluluğu artırır)
+  boot.loader.grub.devices = [ "nodev" ];    # UEFI için diski belirtme ("nodev" kullan)
+  boot.loader.efi.canTouchEfiVariables = true; # EFI değişkenlerine dokunmasına izin ver
+  boot.loader.systemd-boot.enable = false;    # GRUB kullanıyorsak systemd-boot'u kapat
+  # ------------------------------------
 
   system.stateVersion = "25.05";
 }
